@@ -31,6 +31,7 @@ var tracer = otel.Tracer("main")
 
 func main() {
 
+	// slogのセットアップ
 	handler := &CustomHandler{Handler: slog.NewJSONHandler(os.Stdout, nil)}
 	slogger := slog.New(handler)
 	slog.SetDefault(slogger)
@@ -38,6 +39,7 @@ func main() {
 	e := echo.New()
 	e.Use(middleware.Recover())
 
+	// トレースのセットアップ
 	cleanup, err := setupTraceProvider("tempo:4318", "app", "v0.0.0")
 	if err != nil {
 		panic(err)
@@ -48,8 +50,9 @@ func main() {
 			return c.Path() == "/metrics" || c.Path() == "/health"
 		},
 	)
-	e.Use(otelecho.Middleware("api", skipper))
+	e.Use(otelecho.Middleware("app", skipper))
 
+	// アクセスログにtraceID/spanIDを追加
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Skipper: func(c echo.Context) bool {
 			return c.Path() == "/metrics" || c.Path() == "/health"
@@ -66,6 +69,7 @@ func main() {
 		},
 	}))
 
+	// echoのメトリクスを収集
 	e.Use(echoprometheus.NewMiddlewareWithConfig(echoprometheus.MiddlewareConfig{
 		Namespace: "app",
 		Skipper: func(c echo.Context) bool {
@@ -73,6 +77,7 @@ func main() {
 		},
 	}))
 
+	// traceIDをレスポンスヘッダに追加
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			span := trace.SpanFromContext(c.Request().Context())
@@ -83,17 +88,18 @@ func main() {
 
 	e.GET("/metrics", echoprometheus.NewHandler())
 
-    rnd := rand.New(mt19937.New(time.Now().UnixNano()))
-    e.GET("/wait", func(c echo.Context) error {
-        waitTime := time.Duration(rnd.NormFloat64() * 1000 + 500.0) * time.Millisecond
-        if waitTime < 0 || waitTime > time.Second {
-            return c.String(http.StatusInternalServerError, "Invalid wait time")
-        }
-        time.Sleep(waitTime)
-        return c.String(http.StatusOK, fmt.Sprintf("Waited for %v ms", waitTime.Milliseconds()))
-    })
+	// ランダムな時間待機するAPI たまにエラーを返す
+	rnd := rand.New(mt19937.New(time.Now().UnixNano()))
+	e.GET("/wait", func(c echo.Context) error {
+		waitTime := time.Duration(rnd.NormFloat64()*1000+500.0) * time.Millisecond
+		if waitTime < 0 || waitTime > time.Second {
+			return c.String(http.StatusInternalServerError, "Invalid wait time")
+		}
+		time.Sleep(waitTime)
+		return c.String(http.StatusOK, fmt.Sprintf("Waited for %v ms", waitTime.Milliseconds()))
+	})
 
-
+	// 計算を行うAPI
 	e.POST("/calc", CalcHandler)
 
 	e.Logger.Fatal(e.Start(":8000"))
