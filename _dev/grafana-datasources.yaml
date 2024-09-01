@@ -1,0 +1,54 @@
+apiVersion: 1
+
+datasources:
+- name: Prometheus
+  type: prometheus
+  uid: prometheus
+  access: proxy
+  orgId: 1
+  url: http://prometheus:9090
+  basicAuth: false
+  version: 1
+  editable: false
+  jsonData:
+    httpMethod: GET
+- name: Tempo
+  type: tempo
+  uid: tempo
+  access: proxy
+  orgId: 1
+  url: http://tempo:3200
+  basicAuth: false
+  version: 1
+  editable: false
+  apiVersion: 1
+  jsonData: # https://grafana.com/docs/grafana/latest/datasources/tempo/configure-tempo-data-source/#example-file
+    httpMethod: GET
+    serviceMap:
+      datasourceUid: prometheus
+    nodeGraph:
+      enabled: true
+    tracesToLogsV2:
+      datasourceUid: 'loki'
+      spanStartTimeShift: '-1h'
+      spanEndTimeShift: '1h'
+      filterByTraceID: true
+      filterBySpanID: false
+      customQuery: true
+      query: '{compose_service="app"} | json | traceID = "$${__span.traceId}"'
+- name: Loki
+  type: loki
+  uid: loki
+  access: proxy
+  orgId: 1
+  url: http://loki:3100
+  basicAuth: false
+  version: 1
+  editable: false
+  jsonData:
+    derivedFields:
+      - name: TraceID
+        datasourceUid: tempo
+        matcherRegex: '[tT]race_?[iI][dD]"?[:=]"?(\w+)'
+        url: '$${__value.raw}'
+        urlDisplayLabel: 'View Trace'

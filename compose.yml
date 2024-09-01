@@ -1,0 +1,100 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: ./_dev/air/Dockerfile
+    restart: always
+    links:
+      - loki
+      - tempo
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    networks:
+      - external
+      - internal
+    volumes:
+      - ./:/app
+    logging:
+      driver: loki
+      options: 
+        loki-url: http://localhost:3100/loki/api/v1/push
+
+  loki:
+    image: grafana/loki:2.9.2
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./_composeData/loki:/data/loki
+    networks:
+      - internal
+      - external
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./_dev/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./_dev/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./_dev/dashboards:/etc/grafana/dashboards
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    ports:
+      - "3000:3000"
+    networks:
+      - external
+      - internal
+
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "4318:4318"
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./_dev/tempo.yaml:/etc/tempo.yaml
+      - ./_composeData/tempo:/tmp/tempo
+    networks:
+      - internal
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus.yaml
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+      - --enable-feature=native-histograms
+    volumes:
+      - ./_dev/prometheus.yaml:/etc/prometheus.yaml
+      - ./_composeData/prometheus:/etc/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - internal
+
+  k6:
+    image: grafana/k6:latest
+    tty: true
+    volumes:
+      - ./_dev/k6:/scripts
+    environment: # https://grafana.com/docs/k6/latest/using-k6/k6-options/reference/
+      - K6_OUT=experimental-prometheus-rw
+      - K6_LOG_OUTPUT=loki=http://loki:3100/loki/api/v1/push,label.qa=k6
+      - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
+      - K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true
+      # - K6_HTTP_DEBUG=full
+    networks:
+      - internal
+    profiles:
+      - tool
+
+networks:
+  external:
+  internal:
+    internal: true
+ 
